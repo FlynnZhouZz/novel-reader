@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { AntdRegistry } from '@ant-design/nextjs-registry';
-import { Provider } from 'react-redux';
-import { store } from '@/store';
+import Providers from '@/components/common/Providers';
 import AppHeader from '@/components/common/AppHeader';
 import './globals.css';
 
@@ -18,12 +17,12 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        <Provider store={store}>
+        <Providers>
           <AntdRegistry>
             <AppHeader />
             <main style={{ minHeight: 'calc(100vh - 64px)' }}>{children}</main>
           </AntdRegistry>
-        </Provider>
+        </Providers>
       </body>
     </html>
   );

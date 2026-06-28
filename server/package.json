@@ -4,11 +4,11 @@
   "description": "小说阅读器服务端",
   "main": "dist/app.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/app.ts",
+    "dev": "nodemon",
     "build": "tsc",
     "start": "node dist/app.js",
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch"
+    "test": "jest --runInBand --watchman=false",
+    "test:watch": "jest --watch --watchman=false"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
