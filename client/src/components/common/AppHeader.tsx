@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { logout } from '@/store/slices/userSlice';
+import { getAvatarUrl } from '@/utils/url';
 
 const { Header } = Layout;
 
@@ -73,7 +74,7 @@ export default function AppHeader() {
       {mounted && isLoggedIn && userInfo ? (
         <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
           <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Avatar src={userInfo.avatar} icon={<UserOutlined />} />
+            <Avatar src={getAvatarUrl(userInfo.avatar)} icon={<UserOutlined />} />
             <span style={{ color: '#fff' }}>{userInfo.nickname}</span>
           </div>
         </Dropdown>

@@ -5,34 +5,37 @@ interface UserState {
   token: string | null;
   userInfo: UserInfo | null;
   isLoggedIn: boolean;
+  hydrated: boolean;
 }
 
 const initialState: UserState = {
   token: null,
   userInfo: null,
   isLoggedIn: false,
+  hydrated: false,
 };
-
-// 从 localStorage 恢复初始状态
-if (typeof window !== 'undefined') {
-  const token = localStorage.getItem('token');
-  const userInfoStr = localStorage.getItem('userInfo');
-  if (token && userInfoStr) {
-    try {
-      initialState.token = token;
-      initialState.userInfo = JSON.parse(userInfoStr);
-      initialState.isLoggedIn = true;
-    } catch (e) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('userInfo');
-    }
-  }
-}
 
 const userSlice = createSlice({
   name: 'user',
   initialState,
   reducers: {
+    // 客户端挂载后从 localStorage 恢复登录态（避免 SSR/CSR 水合不一致）
+    hydrateAuth: (state) => {
+      if (typeof window === 'undefined') return;
+      const token = localStorage.getItem('token');
+      const userInfoStr = localStorage.getItem('userInfo');
+      if (token && userInfoStr) {
+        try {
+          state.token = token;
+          state.userInfo = JSON.parse(userInfoStr);
+          state.isLoggedIn = true;
+        } catch (e) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userInfo');
+        }
+      }
+      state.hydrated = true;
+    },
     setLoginInfo: (state, action: PayloadAction<{ token: string; user: UserInfo }>) => {
       state.token = action.payload.token;
       state.userInfo = action.payload.user;
@@ -62,5 +65,5 @@ const userSlice = createSlice({
   },
 });
 
-export const { setLoginInfo, updateUserInfo, logout } = userSlice.actions;
+export const { setLoginInfo, updateUserInfo, logout, hydrateAuth } = userSlice.actions;
 export default userSlice.reducer;

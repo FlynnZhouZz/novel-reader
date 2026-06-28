@@ -7,22 +7,24 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { updateUserInfo } from '@/store/slices/userSlice';
 import { getProfile, updateProfile, uploadAvatar, changePassword } from '@/services/user';
+import { getAvatarUrl } from '@/utils/url';
 
 export default function ProfilePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dispatch = useAppDispatch();
-  const { userInfo, isLoggedIn } = useAppSelector((state) => state.user);
+  const { userInfo, isLoggedIn, hydrated } = useAppSelector((state) => state.user);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'info');
 
   useEffect(() => {
-    if (!isLoggedIn) {
+    if (hydrated && !isLoggedIn) {
       router.push('/login');
     }
-  }, [isLoggedIn, router]);
+  }, [hydrated, isLoggedIn, router]);
 
-  if (!isLoggedIn || !userInfo) {
+  // 水合前返回 null，保证 SSR/CSR 首次渲染一致
+  if (!hydrated || !isLoggedIn || !userInfo) {
     return null;
   }
 
@@ -74,7 +76,7 @@ export default function ProfilePage() {
       children: (
         <div>
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <Avatar size={100} src={userInfo.avatar} icon={<UserOutlined />} />
+            <Avatar size={100} src={getAvatarUrl(userInfo.avatar)} icon={<UserOutlined />} />
             <div style={{ marginTop: '16px' }}>
               <Upload
                 beforeUpload={onUploadAvatar}
