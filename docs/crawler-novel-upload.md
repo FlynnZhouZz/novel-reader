@@ -602,36 +602,133 @@ const userId = req.userId!;
 - 避免 HTTP 超时（452 章约 10-20 秒）、路径泄露、token/CORS 复杂度
 - 支持 shell 批量导入多本
 
-### 8.2 脚本设计
+### 8.2 两步流程：登录 + 上传
 
-**文件**：`server/scripts/upload-novel.ts`
+上传分两个独立命令，登录态由本地 token 文件维持（7 天有效）：
+
+```
+第一步：yarn auth --email=... --password=...
+        ↓ 调用 POST /api/v1/auth/login
+        ↓ 保存 token 到 server/.upload-token
+
+第二步：yarn upload <novelDir>
+        ↓ 读取 .upload-token
+        ↓ verifyToken 校验并解析 userId（过期则提示重新 auth）
+        ↓ 直连 service 上传到该 userId 的书架
+```
+
+**为什么分两步**：
+- 登录是一次性操作，token 7 天有效，期间可多次上传
+- 避免每次上传都输邮箱密码
+- token 复用网站登录接口签发的 JWT，与前端登录态完全一致
+
+### 8.3 脚本设计
+
+#### 8.3.1 登录脚本 `server/scripts/login.ts`（`yarn auth`）
 
 ```typescript
 #!/usr/bin/env ts-node
 /**
- * 爬虫小说上传脚本（个人书架模式）
- * 用法：
- *   yarn upload <novelDir> --email=<邮箱> --password=<密码> [--author=<作者>] [--description=<简介>]
- * 流程：
- *   1. 调用登录接口验证账号密码（与网站登录同一接口）
- *   2. 登录失败 → 提示去网站注册
- *   3. 登录成功 → 从响应拿 userId，直连 service 上传到该用户书架
+ * 登录脚本（保存 token 供 upload 脚本使用）
+ * 用法：yarn auth --email=<邮箱> --password=<密码>
  */
-import { uploadNovelFromCrawler } from '../src/services/novelService';
-import { sequelize } from '../src/config/database';
+import fs from 'fs';
+import path from 'path';
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:4000/api/v1';
 const REGISTER_URL = process.env.REGISTER_URL || 'http://localhost:3050/register';
+const TOKEN_FILE = path.join(__dirname, '..', '.upload-token');
+
+async function main() {
+  // 解析参数
+  const args = process.argv.slice(2);
+  const opts: Record<string, string> = {};
+  for (const arg of args) {
+    const m = arg.match(/^--([^=]+)=(.*)$/);
+    if (m) opts[m[1]] = m[2];
+  }
+
+  const { email, password } = opts;
+  if (!email || !password) {
+    console.error('用法: yarn auth --email=<邮箱> --password=<密码>');
+    console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
+    process.exit(1);
+  }
+
+  console.log(`🔑 登录中: ${email}`);
+  const loginRes = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const loginData: any = await loginRes.json();
+  if (loginData.code !== 200 || !loginData.data?.token) {
+    console.error(`❌ 登录失败: ${loginData.message || '未知错误'}`);
+    console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
+    process.exit(1);
+  }
+
+  const { token, user } = loginData.data;
+  fs.writeFileSync(TOKEN_FILE, token, 'utf-8');
+
+  console.log(`✅ 登录成功: ${user.nickname} (id=${user.id}, email=${user.email})`);
+  console.log(`   Token 已保存到 ${TOKEN_FILE}`);
+  console.log(`   有效期 7 天，期间可用 yarn upload 上传，无需再次登录`);
+}
+
+main().catch((e) => {
+  console.error('❌ 失败:', e.message);
+  console.error('请确认后端服务已启动: cd server && yarn dev');
+  process.exit(1);
+});
+```
+
+#### 8.3.2 上传脚本 `server/scripts/upload-novel.ts`（`yarn upload`）
+
+```typescript
+#!/usr/bin/env ts-node
+/**
+ * 上传脚本（使用 token 鉴权）
+ * 用法：yarn upload <novelDir> [--author=...] [--overwrite]
+ * 前置：必须先 yarn auth 登录，token 保存在 .upload-token（7 天过期）
+ */
+import fs from 'fs';
+import path from 'path';
+import { verifyToken } from '../src/utils/jwt';
+import { uploadNovelFromCrawler } from '../src/services/novelService';
+import { sequelize } from '../src/config/database';
+
+const REGISTER_URL = process.env.REGISTER_URL || 'http://localhost:3050/register';
+const TOKEN_FILE = path.join(__dirname, '..', '.upload-token');
 
 async function main() {
   const args = process.argv.slice(2);
   const novelDir = args[0];
   if (!novelDir) {
-    console.error('用法: yarn upload <novelDir> --email=<邮箱> --password=<密码> [...]');
+    console.error('用法: yarn upload <novelDir> [...]');
+    console.error('提示：首次使用需先登录 yarn auth --email=<邮箱> --password=<密码>');
     process.exit(1);
   }
 
-  // 解析 --key=value / --flag 参数
+  // 1. 读取本地 token
+  if (!fs.existsSync(TOKEN_FILE)) {
+    console.error('❌ 未找到登录 token，请先登录: yarn auth --email=<邮箱> --password=<密码>');
+    console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
+    process.exit(1);
+  }
+  const token = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
+
+  // 2. 校验并解析 token（过期会抛错）
+  let userId: number;
+  try {
+    const decoded = verifyToken(token);
+    userId = decoded.userId;
+  } catch (e: any) {
+    console.error('❌ Token 已过期或无效，请重新登录: yarn auth --email=<邮箱> --password=<密码>');
+    process.exit(1);
+  }
+
+  // 3. 解析可选参数
   const opts: Record<string, string> = {};
   for (const arg of args.slice(1)) {
     const m = arg.match(/^--([^=]+)=(.*)$/);
@@ -639,42 +736,9 @@ async function main() {
     else if (arg.startsWith('--')) opts[arg.slice(2)] = '';
   }
 
-  const email = opts.email;
-  const password = opts.password;
-  if (!email || !password) {
-    console.error('错误：必须指定 --email=<邮箱> --password=<密码>');
-    console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
-    process.exit(1);
-  }
-
-  // 1. 登录校验（走 HTTP，与网站登录同一接口）
-  console.log(`🔑 登录中: ${email}`);
-  let userId: number;
-  let nickname: string;
-  try {
-    const loginRes = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const loginData: any = await loginRes.json();
-    if (loginData.code !== 200 || !loginData.data?.token) {
-      console.error(`❌ 登录失败: ${loginData.message || '未知错误'}`);
-      console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
-      process.exit(1);
-    }
-    userId = loginData.data.user.id;
-    nickname = loginData.data.user.nickname;
-    console.log(`✅ 登录成功: ${nickname} (id=${userId})`);
-  } catch (e: any) {
-    console.error(`❌ 登录请求失败: ${e.message}`);
-    console.error('请确认后端服务已启动: cd server && yarn dev');
-    process.exit(1);
-  }
-
-  // 2. 直连 service 上传（避免 HTTP 长连接超时）
+  // 4. 直连 service 上传（避免 HTTP 长连接超时）
   await sequelize.authenticate();
-  console.log(`📖 正在上传到「${nickname}」的书架...`);
+  console.log(`📖 正在上传到 userId=${userId} 的书架...`);
 
   const result = await uploadNovelFromCrawler({
     novelDir,
@@ -688,10 +752,6 @@ async function main() {
 
   console.log(`\n✅ 上传完成: ${result.novelName}`);
   console.log(`   新建: ${result.created}  跳过: ${result.skipped}  失败: ${result.failed}  总计: ${result.totalChapters}`);
-  if (result.errors.length) {
-    console.log('   失败详情:');
-    result.errors.forEach((e) => console.log('   - ' + e));
-  }
 
   await sequelize.close();
   process.exit(result.failed > 0 ? 1 : 0);
@@ -703,53 +763,78 @@ main().catch((e) => {
 });
 ```
 
-### 8.3 package.json script
+### 8.4 package.json scripts
 
 ```json
 {
   "scripts": {
+    "auth": "ts-node scripts/login.ts",
     "upload": "ts-node scripts/upload-novel.ts"
   }
 }
 ```
 
-### 8.4 使用示例
+> **注意**：脚本名用 `auth` 而非 `login`，因为 `yarn login` 是 yarn 内置命令会冲突。
+
+### 8.5 使用示例
 
 ```bash
-# 上传单本（需先登录）
+cd server
+
+# 第一步：登录（token 7 天有效，登录一次即可）
+yarn auth --email=admin@test.com --password=admin123
+
+# 第二步：上传（可多次执行，无需重复登录）
 yarn upload ../../crawler-novels/outputs/html/吞噬星空2：起源大陆 \
-  --email=admin@test.com \
-  --password=admin123 \
   --author=我吃西红柿 \
   --description="罗峰进入起源大陆后的故事"
 
-# 批量上传所有已采集小说
+# 批量上传
 for d in ../../crawler-novels/outputs/html/*/; do
-  yarn upload "$d" --email=admin@test.com --password=admin123
+  yarn upload "$d"
 done
 
 # 覆盖式重传
-yarn upload ../../crawler-novels/outputs/html/吞噬星空2：起源大陆 \
-  --email=admin@test.com --password=admin123 --overwrite
+yarn upload ../../crawler-novels/outputs/html/吞噬星空2：起源大陆 --overwrite
+
+# token 过期后重新登录
+yarn auth --email=admin@test.com --password=admin123
 ```
 
-### 8.5 输出示例
+### 8.6 输出示例
 
+**登录成功**：
 ```
 🔑 登录中: admin@test.com
-✅ 登录成功: 新用户 (id=5)
-📖 正在上传到「新用户」的书架...
+✅ 登录成功: 新用户 (id=5, email=admin@test.com)
+   Token 已保存到 /path/to/server/.upload-token
+   有效期 7 天，期间可用 yarn upload 上传，无需再次登录
+```
+
+**上传成功**：
+```
+📖 正在上传到 userId=5 的书架...
 ✅ 上传完成: 吞噬星空2：起源大陆
    新建: 452  跳过: 0  失败: 0  总计: 452
 ```
 
-### 8.6 登录失败输出示例
-
+**未登录直接上传**：
 ```
-🔑 登录中: admin@test.com
-❌ 登录失败: 邮箱或密码错误
+❌ 未找到登录 token，请先登录: yarn auth --email=<邮箱> --password=<密码>
 没有账号？请到 http://localhost:3050/register 注册
 ```
+
+**token 过期**：
+```
+❌ Token 已过期或无效，请重新登录: yarn auth --email=<邮箱> --password=<密码>
+```
+
+### 8.7 token 文件管理
+
+- 位置：`server/.upload-token`（已加入 `.gitignore`）
+- 有效期：7 天（由 JWT `jwtExpiresIn: '7d'` 决定，与网站登录一致）
+- 过期处理：重新执行 `yarn auth` 覆盖写入新 token
+- 清除登录态：`rm server/.upload-token`
 
 ---
 

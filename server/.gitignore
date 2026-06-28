@@ -4,3 +4,4 @@ uploads/
 .env.test
 coverage/
 *.log
+.upload-token

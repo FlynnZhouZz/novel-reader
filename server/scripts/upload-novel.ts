@@ -1,86 +1,67 @@
 #!/usr/bin/env ts-node
 /**
- * 爬虫小说上传脚本（个人书架模式）
+ * 爬虫小说上传脚本（个人书架模式，使用 token 鉴权）
  *
  * 用法：
- *   yarn upload <novelDir> --email=<邮箱> --password=<密码> [--author=<作者>] [--description=<简介>] [--cover=<url>] [--overwrite] [--content-base=<dir>]
+ *   yarn upload <novelDir> [--author=<作者>] [--description=<简介>] [--cover=<url>] [--overwrite] [--content-base=<dir>]
  *
- * 示例：
- *   yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" --email=admin@test.com --password=admin123 --author=我吃西红柿
+ * 前置条件：
+ *   必须先运行 yarn auth 登录，token 保存在 .upload-token（7 天过期）
  *
  * 流程：
- *   1. 调用登录接口验证账号密码（与网站登录同一接口）
- *   2. 登录失败 → 提示去网站注册
- *   3. 登录成功 → 从响应拿 userId，直连 service 上传到该用户书架
- *
- * 说明：
- *   - 必须先有账号，没有账号请到网站注册：http://localhost:3050/register
- *   - 脚本走 HTTP 登录接口校验身份，登录态与网站一致
- *   - 上传部分直连 service 函数，避免 HTTP 长连接超时（452 章约 10-20 秒）
+ *   1. 读取本地 .upload-token
+ *   2. 用 verifyToken 校验并解析 userId
+ *   3. token 无效/过期 → 提示重新 yarn login
+ *   4. token 有效 → 直连 service 上传到该用户书架
  */
+import fs from 'fs';
+import path from 'path';
+import { verifyToken } from '../src/utils/jwt';
 import { uploadNovelFromCrawler } from '../src/services/novelService';
 import { sequelize } from '../src/config/database';
 
-// 后端 API 地址（默认本地，可用环境变量覆盖）
-const API_BASE = process.env.API_BASE_URL || 'http://localhost:4000/api/v1';
-// 前端注册页地址（用于失败提示）
 const REGISTER_URL = process.env.REGISTER_URL || 'http://localhost:3050/register';
+const TOKEN_FILE = path.join(__dirname, '..', '.upload-token');
 
 async function main() {
   const args = process.argv.slice(2);
   const novelDir = args[0];
   if (!novelDir) {
-    console.error('用法: yarn upload <novelDir> --email=<邮箱> --password=<密码> [--author=...] [--description=...] [--cover=...] [--overwrite] [--content-base=...]');
+    console.error('用法: yarn upload <novelDir> [--author=...] [--description=...] [--cover=...] [--overwrite] [--content-base=...]');
+    console.error('提示：首次使用需先登录 yarn auth --email=<邮箱> --password=<密码>');
     process.exit(1);
   }
 
-  // 解析 --key=value / --flag 参数
-  const opts: Record<string, string> = {};
-  for (const arg of args.slice(1)) {
-    const m = arg.match(/^--([^=]+)=(.*)$/);
-    if (m) {
-      opts[m[1]] = m[2];
-    } else if (arg.startsWith('--')) {
-      opts[arg.slice(2)] = ''; // flag，如 --overwrite
-    }
-  }
-
-  const email = opts.email;
-  const password = opts.password;
-  if (!email || !password) {
-    console.error('错误：必须指定 --email=<邮箱> --password=<密码>');
+  // 1. 读取本地 token
+  if (!fs.existsSync(TOKEN_FILE)) {
+    console.error('❌ 未找到登录 token，请先登录: yarn auth --email=<邮箱> --password=<密码>');
     console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
     process.exit(1);
   }
 
-  // 1. 登录校验（走 HTTP，与网站登录同一接口）
-  console.log(`🔑 登录中: ${email}`);
+  const token = fs.readFileSync(TOKEN_FILE, 'utf-8').trim();
+
+  // 2. 校验并解析 token
   let userId: number;
-  let nickname: string;
   try {
-    const loginRes = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const loginData: any = await loginRes.json();
-    if (loginData.code !== 200 || !loginData.data?.token) {
-      console.error(`❌ 登录失败: ${loginData.message || '未知错误'}`);
-      console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
-      process.exit(1);
-    }
-    userId = loginData.data.user.id;
-    nickname = loginData.data.user.nickname;
-    console.log(`✅ 登录成功: ${nickname} (id=${userId})`);
+    const decoded = verifyToken(token);
+    userId = decoded.userId;
   } catch (e: any) {
-    console.error(`❌ 登录请求失败: ${e.message}`);
-    console.error('请确认后端服务已启动: cd server && yarn dev');
+    console.error('❌ Token 已过期或无效，请重新登录: yarn auth --email=<邮箱> --password=<密码>');
     process.exit(1);
   }
 
-  // 2. 直连 service 上传（避免 HTTP 长连接超时）
+  // 解析可选参数
+  const opts: Record<string, string> = {};
+  for (const arg of args.slice(1)) {
+    const m = arg.match(/^--([^=]+)=(.*)$/);
+    if (m) opts[m[1]] = m[2];
+    else if (arg.startsWith('--')) opts[arg.slice(2)] = '';
+  }
+
+  // 3. 直连 service 上传（避免 HTTP 长连接超时）
   await sequelize.authenticate();
-  console.log(`📖 正在上传到「${nickname}」的书架...`);
+  console.log(`📖 正在上传到 userId=${userId} 的书架...`);
   console.log(`   目录: ${novelDir}`);
 
   const result = await uploadNovelFromCrawler({

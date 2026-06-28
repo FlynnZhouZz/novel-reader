@@ -93,42 +93,63 @@ yarn dev     # 默认 http://localhost:3050
 
 ## 上传爬虫小说
 
-爬虫采集结果存放于 [crawler-novels](../crawler-novels) 项目的 `outputs/` 目录。使用 npm 命令上传到指定用户书架：
+爬虫采集结果存放于 [crawler-novels](../crawler-novels) 项目的 `outputs/` 目录。上传分两步：先登录保存 token，再用 token 上传。
+
+### 第一步：登录（保存 token，7 天有效）
+
+```bash
+cd server
+yarn auth --email=admin@test.com --password=admin123
+```
+
+登录成功后 token 保存在 `server/.upload-token`，有效期 7 天，期间可多次上传无需重复登录。token 过期后重新执行 `yarn auth` 即可。
+
+**必须先有账号**：脚本调用网站登录接口校验账号密码。没有账号请到 [http://localhost:3050/register](http://localhost:3050/register) 注册。
+
+### 第二步：上传（使用 token）
 
 ```bash
 cd server
 
-# 上传单本（需先登录）
+# 上传单本
 yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" \
-  --email=cn.foxfly@gmail.com \
-  --password=zz123456 \
   --author=我吃西红柿 \
   --description="罗峰进入起源大陆后的故事"
 
 # 批量上传所有已采集小说
 for d in ../../crawler-novels/outputs/html/*/; do
-  yarn upload "$d" --email=admin@test.com --password=admin123
+  yarn upload "$d"
 done
 
 # 覆盖式重传
-yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" \
-  --email=admin@test.com --password=admin123 --overwrite
+yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" --overwrite
 ```
 
-参数说明：
+### 参数说明
+
+**`yarn auth`（登录）**
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--email=<邮箱>` | 是 | 登录邮箱 |
+| `--password=<密码>` | 是 | 登录密码 |
+
+**`yarn upload`（上传）**
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `<novelDir>` | 是 | crawler-novels 的 `outputs/html/{小说名}/` 目录路径 |
-| `--email=<邮箱>` | 是 | 登录邮箱（小说上传到该用户书架） |
-| `--password=<密码>` | 是 | 登录密码 |
 | `--author=<作者>` | 否 | 小说作者，默认"未知作者" |
 | `--description=<简介>` | 否 | 小说简介 |
 | `--cover=<url>` | 否 | 封面 URL |
 | `--overwrite` | 否 | 覆盖已存在章节，默认增量更新 |
 | `--content-base=<dir>` | 否 | content 根目录，默认从 novelDir 推断 |
 
-**必须先有账号**：脚本会调用登录接口校验账号密码，与网站登录同一接口。没有账号请到 [http://localhost:3050/register](http://localhost:3050/register) 注册。登录成功后，脚本直连 service 上传到该用户书架（避免 HTTP 长连接超时）。
+### 常见问题
+
+- **未登录直接上传**：提示「未找到登录 token，请先登录」→ 先执行 `yarn auth`
+- **token 过期**：提示「Token 已过期或无效」→ 重新执行 `yarn auth`
+- **后端未启动**：提示「登录请求失败」→ 先启动后端 `cd server && yarn dev`
 
 详细设计见 [docs/crawler-novel-upload.md](./docs/crawler-novel-upload.md)。
 
