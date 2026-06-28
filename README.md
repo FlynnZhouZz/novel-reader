@@ -168,3 +168,10 @@ yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" --o
 - [技术设计](./docs/technical-design.md)
 - [爬虫小说上传设计](./docs/crawler-novel-upload.md)
 - [AGENTS.md](./AGENTS.md) — AI 开发工具协作规范
+
+## TODO
+
+- 我的作品，小说可自行设置小说相关数据，如：小说名、封面、作者、简介、目录章节名称等。
+- 小说目录要分为两种
+    - 有分卷的，卷下面才会分章节
+    - 部分卷的，直接是章节的
