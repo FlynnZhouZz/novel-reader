@@ -285,8 +285,11 @@ yarn upload <novelDir> [options]
 位置参数：
   novelDir                crawler-novels 的 outputs/html/{小说名}/ 目录路径
 
+必填参数：
+  --email=<邮箱>          登录邮箱（与网站登录同一接口校验）
+  --password=<密码>       登录密码
+
 可选参数：
-  --user=<email>          归属用户邮箱（必填，用于查 User 表得 user_id）
   --author=<作者>         小说作者（默认 "未知作者"）
   --cover=<url>           封面 URL
   --description=<简介>    小说简介
@@ -294,7 +297,7 @@ yarn upload <novelDir> [options]
   --content-base=<dir>    content 根目录（默认推断）
 ```
 
-> **为什么不登录**：脚本直接 import service 函数，不经 HTTP/authMiddleware。能跑脚本 = 有服务器权限 = 已是管理员。`--user` 仅用于指定"这本小说归属哪个普通用户书架"，不是鉴权。
+> **登录校验流程**：脚本调用 `POST /api/v1/auth/login` 验证账号密码，与网站登录同一接口。登录失败提示去 `http://localhost:3050/register` 注册。登录成功后从响应拿 `user.id`，直连 service 上传到该用户书架（避免 HTTP 长连接超时）。**必须先有账号**，没有账号请到网站注册。
 
 ### 4.3 service 改造方案
 
@@ -608,60 +611,90 @@ const userId = req.userId!;
 /**
  * 爬虫小说上传脚本（个人书架模式）
  * 用法：
- *   yarn upload <novelDir> --user=<email> [--author=<作者>] [--description=<简介>]
+ *   yarn upload <novelDir> --email=<邮箱> --password=<密码> [--author=<作者>] [--description=<简介>]
+ * 流程：
+ *   1. 调用登录接口验证账号密码（与网站登录同一接口）
+ *   2. 登录失败 → 提示去网站注册
+ *   3. 登录成功 → 从响应拿 userId，直连 service 上传到该用户书架
  */
-import { User } from '../src/models';
 import { uploadNovelFromCrawler } from '../src/services/novelService';
 import { sequelize } from '../src/config/database';
+
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:4000/api/v1';
+const REGISTER_URL = process.env.REGISTER_URL || 'http://localhost:3050/register';
 
 async function main() {
   const args = process.argv.slice(2);
   const novelDir = args[0];
   if (!novelDir) {
-    console.error('用法: yarn upload <novelDir> --user=<email> [--author=...]');
+    console.error('用法: yarn upload <novelDir> --email=<邮箱> --password=<密码> [...]');
     process.exit(1);
   }
 
-  // 解析 --key=value 参数
+  // 解析 --key=value / --flag 参数
   const opts: Record<string, string> = {};
   for (const arg of args.slice(1)) {
     const m = arg.match(/^--([^=]+)=(.*)$/);
     if (m) opts[m[1]] = m[2];
+    else if (arg.startsWith('--')) opts[arg.slice(2)] = '';
   }
 
-  const userEmail = opts.user;
-  if (!userEmail) {
-    console.error('错误：必须指定 --user=<email>（归属用户邮箱）');
+  const email = opts.email;
+  const password = opts.password;
+  if (!email || !password) {
+    console.error('错误：必须指定 --email=<邮箱> --password=<密码>');
+    console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
     process.exit(1);
   }
 
+  // 1. 登录校验（走 HTTP，与网站登录同一接口）
+  console.log(`🔑 登录中: ${email}`);
+  let userId: number;
+  let nickname: string;
+  try {
+    const loginRes = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const loginData: any = await loginRes.json();
+    if (loginData.code !== 200 || !loginData.data?.token) {
+      console.error(`❌ 登录失败: ${loginData.message || '未知错误'}`);
+      console.error(`没有账号？请到 ${REGISTER_URL} 注册`);
+      process.exit(1);
+    }
+    userId = loginData.data.user.id;
+    nickname = loginData.data.user.nickname;
+    console.log(`✅ 登录成功: ${nickname} (id=${userId})`);
+  } catch (e: any) {
+    console.error(`❌ 登录请求失败: ${e.message}`);
+    console.error('请确认后端服务已启动: cd server && yarn dev');
+    process.exit(1);
+  }
+
+  // 2. 直连 service 上传（避免 HTTP 长连接超时）
   await sequelize.authenticate();
+  console.log(`📖 正在上传到「${nickname}」的书架...`);
 
-  // 按 email 查用户，得 user_id
-  const user = await User.findOne({ where: { email: userEmail } });
-  if (!user) {
-    console.error(`错误：用户不存在 ${userEmail}`);
-    process.exit(1);
-  }
-
-  console.log(`📖 正在上传到 ${user.nickname} 的书架...`);
   const result = await uploadNovelFromCrawler({
     novelDir,
-    userId: user.id,
+    userId,
     author: opts.author,
     description: opts.description,
-    cover: opts.cover,
+    cover: opts.cover || undefined,
     overwrite: 'overwrite' in opts,
-    contentBaseDir: opts['content-base'],
+    contentBaseDir: opts['content-base'] || undefined,
   });
 
-  console.log(`✅ 上传完成: ${result.novelName}`);
-  console.log(`   新建: ${result.created}  跳过: ${result.skipped}  失败: ${result.failed}`);
+  console.log(`\n✅ 上传完成: ${result.novelName}`);
+  console.log(`   新建: ${result.created}  跳过: ${result.skipped}  失败: ${result.failed}  总计: ${result.totalChapters}`);
   if (result.errors.length) {
     console.log('   失败详情:');
     result.errors.forEach((e) => console.log('   - ' + e));
   }
-  process.exit(0);
+
+  await sequelize.close();
+  process.exit(result.failed > 0 ? 1 : 0);
 }
 
 main().catch((e) => {
@@ -683,28 +716,39 @@ main().catch((e) => {
 ### 8.4 使用示例
 
 ```bash
-# 上传单本到指定用户书架
-yarn upload ../crawler-novels/outputs/html/吞噬星空2：起源大陆 \
-  --user=admin@test.com \
+# 上传单本（需先登录）
+yarn upload ../../crawler-novels/outputs/html/吞噬星空2：起源大陆 \
+  --email=admin@test.com \
+  --password=admin123 \
   --author=我吃西红柿 \
   --description="罗峰进入起源大陆后的故事"
 
-# 批量上传所有已采集小说到同一用户书架
-for d in ../crawler-novels/outputs/html/*/; do
-  yarn upload "$d" --user=admin@test.com --author=未知
+# 批量上传所有已采集小说
+for d in ../../crawler-novels/outputs/html/*/; do
+  yarn upload "$d" --email=admin@test.com --password=admin123
 done
 
 # 覆盖式重传
-yarn upload ../crawler-novels/outputs/html/吞噬星空2：起源大陆 \
-  --user=admin@test.com --overwrite
+yarn upload ../../crawler-novels/outputs/html/吞噬星空2：起源大陆 \
+  --email=admin@test.com --password=admin123 --overwrite
 ```
 
 ### 8.5 输出示例
 
 ```
-📖 正在上传到 管理员 的书架...
+🔑 登录中: admin@test.com
+✅ 登录成功: 新用户 (id=5)
+📖 正在上传到「新用户」的书架...
 ✅ 上传完成: 吞噬星空2：起源大陆
-   新建: 452  跳过: 0  失败: 0
+   新建: 452  跳过: 0  失败: 0  总计: 452
+```
+
+### 8.6 登录失败输出示例
+
+```
+🔑 登录中: admin@test.com
+❌ 登录失败: 邮箱或密码错误
+没有账号？请到 http://localhost:3050/register 注册
 ```
 
 ---

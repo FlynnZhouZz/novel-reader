@@ -98,20 +98,21 @@ yarn dev     # 默认 http://localhost:3050
 ```bash
 cd server
 
-# 上传单本
+# 上传单本（需先登录）
 yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" \
-  --user=admin@test.com \
+  --email=cn.foxfly@gmail.com \
+  --password=zz123456 \
   --author=我吃西红柿 \
   --description="罗峰进入起源大陆后的故事"
 
 # 批量上传所有已采集小说
 for d in ../../crawler-novels/outputs/html/*/; do
-  yarn upload "$d" --user=admin@test.com
+  yarn upload "$d" --email=admin@test.com --password=admin123
 done
 
 # 覆盖式重传
 yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" \
-  --user=admin@test.com --overwrite
+  --email=admin@test.com --password=admin123 --overwrite
 ```
 
 参数说明：
@@ -119,14 +120,15 @@ yarn upload "../../crawler-novels/outputs/html/吞噬星空2：起源大陆" \
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | `<novelDir>` | 是 | crawler-novels 的 `outputs/html/{小说名}/` 目录路径 |
-| `--user=<email>` | 是 | 归属用户邮箱（小说上传到该用户书架） |
+| `--email=<邮箱>` | 是 | 登录邮箱（小说上传到该用户书架） |
+| `--password=<密码>` | 是 | 登录密码 |
 | `--author=<作者>` | 否 | 小说作者，默认"未知作者" |
 | `--description=<简介>` | 否 | 小说简介 |
 | `--cover=<url>` | 否 | 封面 URL |
 | `--overwrite` | 否 | 覆盖已存在章节，默认增量更新 |
 | `--content-base=<dir>` | 否 | content 根目录，默认从 novelDir 推断 |
 
-脚本直接调用 service 函数，不经 HTTP / 鉴权。能跑脚本即视为有服务器权限（管理员），`--user` 仅用于指定小说归属用户，不是登录鉴权。
+**必须先有账号**：脚本会调用登录接口校验账号密码，与网站登录同一接口。没有账号请到 [http://localhost:3050/register](http://localhost:3050/register) 注册。登录成功后，脚本直连 service 上传到该用户书架（避免 HTTP 长连接超时）。
 
 详细设计见 [docs/crawler-novel-upload.md](./docs/crawler-novel-upload.md)。
 
