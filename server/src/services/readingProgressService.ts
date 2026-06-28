@@ -5,7 +5,7 @@ export interface ProgressInfo {
   scrollPosition: number;
 }
 
-// 获取阅读进度
+// 获取阅读进度（含小说归属校验）
 export const getProgress = async (
   userId: number,
   novelId: number
@@ -13,6 +13,9 @@ export const getProgress = async (
   const novel = await Novel.findByPk(novelId);
   if (!novel) {
     throw new Error('小说不存在');
+  }
+  if (novel.user_id !== userId) {
+    throw new Error('无权访问该小说');
   }
 
   const progress = await ReadingProgress.findOne({
@@ -29,7 +32,7 @@ export const getProgress = async (
   };
 };
 
-// 更新阅读进度
+// 更新阅读进度（含小说归属校验）
 export const updateProgress = async (
   userId: number,
   novelId: number,
@@ -39,6 +42,9 @@ export const updateProgress = async (
   const novel = await Novel.findByPk(novelId);
   if (!novel) {
     throw new Error('小说不存在');
+  }
+  if (novel.user_id !== userId) {
+    throw new Error('无权访问该小说');
   }
 
   const chapter = await Chapter.findOne({

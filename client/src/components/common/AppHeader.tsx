@@ -34,7 +34,7 @@ export default function AppHeader() {
 
   const menuItems = [
     { key: '/', label: <Link href="/">首页</Link>, icon: <HomeOutlined /> },
-    { key: '/novels', label: <Link href="/novels">小说库</Link>, icon: <BookOutlined /> },
+    { key: '/novels', label: <Link href="/novels">我的书架</Link>, icon: <BookOutlined /> },
   ];
 
   const userMenuItems = [

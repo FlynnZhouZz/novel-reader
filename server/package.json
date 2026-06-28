@@ -7,6 +7,7 @@
     "dev": "nodemon",
     "build": "tsc",
     "start": "node dist/app.js",
+    "upload": "ts-node scripts/upload-novel.ts",
     "test": "jest --runInBand --watchman=false",
     "test:watch": "jest --watch --watchman=false"
   },

@@ -7,6 +7,7 @@ export interface NovelAttributes {
   cover?: string | null;
   description?: string | null;
   author: string;
+  user_id: number;
   created_at?: Date;
   updated_at?: Date;
 }
@@ -17,6 +18,7 @@ class Novel extends Model<NovelAttributes> implements NovelAttributes {
   public cover!: string | null;
   public description!: string | null;
   public author!: string;
+  public user_id!: number;
   public created_at!: Date;
   public updated_at!: Date;
 }
@@ -50,6 +52,11 @@ Novel.init(
       type: DataTypes.STRING(50),
       allowNull: false,
       comment: '作者',
+    },
+    user_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      comment: '归属用户ID（个人书架）',
     },
   },
   {

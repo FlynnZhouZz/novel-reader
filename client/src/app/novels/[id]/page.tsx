@@ -6,6 +6,7 @@ import { Card, Spin, List, Button, Typography, message, Empty } from 'antd';
 import { ArrowLeftOutlined, ReadOutlined } from '@ant-design/icons';
 import Link from 'next/link';
 import { getNovelDetail, getChapterList } from '@/services/novel';
+import { useAppSelector } from '@/store/hooks';
 import { Novel, ChapterListItem } from '@/types';
 
 const { Title, Paragraph, Text } = Typography;
@@ -14,12 +15,18 @@ export default function NovelDetailPage() {
   const params = useParams();
   const router = useRouter();
   const novelId = Number(params.id);
+  const { isLoggedIn, hydrated } = useAppSelector((state) => state.user);
 
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<ChapterListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!hydrated) return;
+    if (!isLoggedIn) {
+      router.push('/login');
+      return;
+    }
     if (!novelId) return;
 
     const fetchData = async () => {
@@ -39,7 +46,7 @@ export default function NovelDetailPage() {
     };
 
     fetchData();
-  }, [novelId]);
+  }, [novelId, hydrated, isLoggedIn]);
 
   if (loading) {
     return (

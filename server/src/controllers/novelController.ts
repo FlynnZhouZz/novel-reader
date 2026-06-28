@@ -5,6 +5,7 @@ import { success, badRequest, serverError } from '../utils/response';
 // 获取小说列表
 export const getNovelList = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.userId!;
     const parsedPage = parseInt(req.query.page as string);
     const parsedLimit = parseInt(req.query.limit as string);
     const page = isNaN(parsedPage) ? 1 : parsedPage;
@@ -16,7 +17,7 @@ export const getNovelList = async (req: Request, res: Response): Promise<void> =
       badRequest(res, '分页参数无效');
       return;
     }
-    const result = await novelService.getNovelList(page, limit, keyword, author);
+    const result = await novelService.getNovelList(userId, page, limit, keyword, author);
     success(res, result);
   } catch (error) {
     serverError(res, (error as Error).message);
@@ -26,6 +27,7 @@ export const getNovelList = async (req: Request, res: Response): Promise<void> =
 // 获取小说详情
 export const getNovelDetail = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.userId!;
     const id = parseInt(req.params.id);
 
     if (isNaN(id) || id < 1) {
@@ -33,7 +35,7 @@ export const getNovelDetail = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const novel = await novelService.getNovelDetail(id);
+    const novel = await novelService.getNovelDetail(id, userId);
     success(res, novel);
   } catch (error) {
     serverError(res, (error as Error).message);
@@ -43,6 +45,7 @@ export const getNovelDetail = async (req: Request, res: Response): Promise<void>
 // 获取章节目录
 export const getChapterList = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.userId!;
     const novelId = parseInt(req.params.id);
 
     if (isNaN(novelId) || novelId < 1) {
@@ -50,7 +53,7 @@ export const getChapterList = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const chapters = await novelService.getChapterList(novelId);
+    const chapters = await novelService.getChapterList(novelId, userId);
     success(res, chapters);
   } catch (error) {
     serverError(res, (error as Error).message);
@@ -60,6 +63,7 @@ export const getChapterList = async (req: Request, res: Response): Promise<void>
 // 获取章节内容
 export const getChapterDetail = async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.userId!;
     const novelId = parseInt(req.params.novelId);
     const chapterId = parseInt(req.params.chapterId);
 
@@ -73,7 +77,7 @@ export const getChapterDetail = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const chapter = await novelService.getChapterDetail(novelId, chapterId);
+    const chapter = await novelService.getChapterDetail(novelId, chapterId, userId);
     success(res, chapter);
   } catch (error) {
     serverError(res, (error as Error).message);
@@ -102,6 +106,7 @@ export const uploadNovelFromCrawler = async (req: Request, res: Response): Promi
 
     const result = await novelService.uploadNovelFromCrawler({
       novelDir: finalNovelDir,
+      userId: req.userId!,
       author,
       contentBaseDir,
       cover,
@@ -129,7 +134,7 @@ export const createNovel = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const result = await novelService.createNovel(name, author, cover, description);
+    const result = await novelService.createNovel(req.userId!, name, author, cover, description);
     success(res, result, '创建成功');
   } catch (error) {
     serverError(res, (error as Error).message);
@@ -157,7 +162,7 @@ export const createChapter = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await novelService.createChapter(novelId, title, content, orderNum);
+    const result = await novelService.createChapter(novelId, req.userId!, title, content, orderNum);
     success(res, result, '创建成功');
   } catch (error) {
     serverError(res, (error as Error).message);

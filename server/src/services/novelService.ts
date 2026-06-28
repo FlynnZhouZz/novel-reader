@@ -31,14 +31,15 @@ export interface ChapterDetail {
   nextChapterId: number | null;
 }
 
-// 获取小说列表（分页+搜索）
+// 获取小说列表（分页+搜索，按用户书架过滤）
 export const getNovelList = async (
+  userId: number,
   page: number = 1,
   limit: number = 20,
   keyword?: string,
   author?: string
 ): Promise<{ list: NovelListItem[]; total: number; page: number; limit: number }> => {
-  const where: any = {};
+  const where: any = { user_id: userId };
 
   if (keyword) {
     where[Op.or] = [
@@ -82,8 +83,8 @@ export const getNovelList = async (
   return { list, total: count, page, limit };
 };
 
-// 获取小说详情
-export const getNovelDetail = async (id: number): Promise<NovelDetail> => {
+// 获取小说详情（含归属校验）
+export const getNovelDetail = async (id: number, userId: number): Promise<NovelDetail> => {
   const novel = await Novel.findByPk(id, {
     include: [
       {
@@ -99,6 +100,10 @@ export const getNovelDetail = async (id: number): Promise<NovelDetail> => {
     throw new Error('小说不存在');
   }
 
+  if (novel.user_id !== userId) {
+    throw new Error('无权访问该小说');
+  }
+
   return {
     id: novel.id,
     name: novel.name,
@@ -110,11 +115,14 @@ export const getNovelDetail = async (id: number): Promise<NovelDetail> => {
   };
 };
 
-// 获取章节目录
-export const getChapterList = async (novelId: number): Promise<ChapterListItem[]> => {
+// 获取章节目录（含归属校验）
+export const getChapterList = async (novelId: number, userId: number): Promise<ChapterListItem[]> => {
   const novel = await Novel.findByPk(novelId);
   if (!novel) {
     throw new Error('小说不存在');
+  }
+  if (novel.user_id !== userId) {
+    throw new Error('无权访问该小说');
   }
 
   const chapters = await Chapter.findAll({
@@ -130,11 +138,20 @@ export const getChapterList = async (novelId: number): Promise<ChapterListItem[]
   }));
 };
 
-// 获取章节内容
+// 获取章节内容（含归属校验）
 export const getChapterDetail = async (
   novelId: number,
-  chapterId: number
+  chapterId: number,
+  userId: number
 ): Promise<ChapterDetail> => {
+  const novel = await Novel.findByPk(novelId);
+  if (!novel) {
+    throw new Error('小说不存在');
+  }
+  if (novel.user_id !== userId) {
+    throw new Error('无权访问该小说');
+  }
+
   const chapter = await Chapter.findOne({
     where: { id: chapterId, novel_id: novelId },
   });
@@ -188,6 +205,7 @@ interface CrawlerIndex {
 
 export interface UploadOptions {
   novelDir: string;
+  userId: number;          // 归属用户（个人书架）
   author?: string;
   contentBaseDir?: string;
   cover?: string;
@@ -206,19 +224,17 @@ export interface UploadResult {
 }
 
 export const uploadNovelFromCrawler = async (
-  options: UploadOptions | string
+  options: UploadOptions
 ): Promise<UploadResult> => {
-  // 兼容旧版字符串参数：视为 novelDir
-  const opts: UploadOptions =
-    typeof options === 'string' ? { novelDir: options } : options;
   const {
     novelDir,
+    userId,
     author,
     contentBaseDir,
     cover,
     description,
     overwrite = false,
-  } = opts;
+  } = options;
 
   // 1. 校验并定位 index.json
   const absoluteNovelDir = path.resolve(novelDir);
@@ -243,11 +259,12 @@ export const uploadNovelFromCrawler = async (
 
   // 3. 事务内处理
   return await sequelize.transaction(async (t) => {
-    // 3.1 查询或创建小说
+    // 3.1 查询或创建小说（按用户书架 + 小说名去重）
     const [novel, novelCreated] = await Novel.findOrCreate({
-      where: { name: novelName },
+      where: { name: novelName, user_id: userId },
       defaults: {
         name: novelName,
+        user_id: userId,
         author: author || '未知作者',
         cover: cover || null,
         description: description || null,
@@ -374,8 +391,9 @@ export const uploadNovelFromCrawler = async (
   });
 };
 
-// 创建小说（手动）
+// 创建小说（手动，归属当前用户）
 export const createNovel = async (
+  userId: number,
   name: string,
   author: string,
   cover?: string,
@@ -384,6 +402,7 @@ export const createNovel = async (
   const novel = await Novel.create({
     name,
     author,
+    user_id: userId,
     cover: cover || null,
     description: description || null,
   });
@@ -391,9 +410,10 @@ export const createNovel = async (
   return { id: novel.id, name: novel.name, author: novel.author };
 };
 
-// 创建章节（手动）
+// 创建章节（手动，含归属校验）
 export const createChapter = async (
   novelId: number,
+  userId: number,
   title: string,
   content: string,
   orderNum?: number
@@ -401,6 +421,9 @@ export const createChapter = async (
   const novel = await Novel.findByPk(novelId);
   if (!novel) {
     throw new Error('小说不存在');
+  }
+  if (novel.user_id !== userId) {
+    throw new Error('无权操作该小说');
   }
 
   // 如果未指定序号，则自动递增
