@@ -16,6 +16,7 @@ describe('userSlice', () => {
       token: null,
       userInfo: null,
       isLoggedIn: false,
+      hydrated: false,
     });
   });
 
@@ -24,6 +25,7 @@ describe('userSlice', () => {
       token: null,
       userInfo: null,
       isLoggedIn: false,
+      hydrated: false,
     };
 
     const action = setLoginInfo({ token: 'test-token', user: mockUser });
@@ -39,6 +41,7 @@ describe('userSlice', () => {
       token: 'test-token',
       userInfo: mockUser,
       isLoggedIn: true,
+      hydrated: true,
     };
 
     const action = updateUserInfo({ nickname: '新昵称', bio: '新简介' });
@@ -54,6 +57,7 @@ describe('userSlice', () => {
       token: 'test-token',
       userInfo: mockUser,
       isLoggedIn: true,
+      hydrated: true,
     };
 
     const state = userReducer(initialState, logout());

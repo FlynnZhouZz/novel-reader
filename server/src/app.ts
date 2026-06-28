@@ -5,6 +5,7 @@ import { config } from './config';
 import { connectDB } from './config/database';
 import authRoutes from './routes/auth';
 import novelRoutes from './routes/novel';
+import bookshelfRoutes from './routes/bookshelf';
 import readerRoutes from './routes/reader';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler';
 
@@ -29,6 +30,7 @@ app.get('/health', (req, res) => {
 // 路由
 app.use('/api/v1', authRoutes);
 app.use('/api/v1', novelRoutes);
+app.use('/api/v1', bookshelfRoutes);
 app.use('/api/v1', readerRoutes);
 
 // 404处理

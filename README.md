@@ -99,7 +99,7 @@ yarn dev     # 默认 http://localhost:3050
 
 ```bash
 cd server
-yarn auth --email=admin@test.com --password=admin123
+yarn auth --email=cn.foxfly@gmail.com --password=zz123456
 ```
 
 登录成功后 token 保存在 `server/.upload-token`，有效期 7 天，期间可多次上传无需重复登录。token 过期后重新执行 `yarn auth` 即可。

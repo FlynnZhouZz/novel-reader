@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Card, Spin, List, Button, Typography, message, Empty } from 'antd';
-import { ArrowLeftOutlined, ReadOutlined } from '@ant-design/icons';
+import { Card, Spin, List, Button, Typography, Switch, Space, message, Empty } from 'antd';
+import { ArrowLeftOutlined, ReadOutlined, HeartOutlined, HeartFilled } from '@ant-design/icons';
 import Link from 'next/link';
-import { getNovelDetail, getChapterList } from '@/services/novel';
+import { getNovelDetail, getChapterList, addToBookshelf, removeFromBookshelf, checkBookshelf, updateNovelVisibility } from '@/services/novel';
 import { useAppSelector } from '@/store/hooks';
 import { Novel, ChapterListItem } from '@/types';
 
@@ -20,13 +20,12 @@ export default function NovelDetailPage() {
   const [novel, setNovel] = useState<Novel | null>(null);
   const [chapters, setChapters] = useState<ChapterListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inBookshelf, setInBookshelf] = useState(false);
+  const [togglingShelf, setTogglingShelf] = useState(false);
+  const [togglingVisibility, setTogglingVisibility] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
-    if (!isLoggedIn) {
-      router.push('/login');
-      return;
-    }
     if (!novelId) return;
 
     const fetchData = async () => {
@@ -38,6 +37,15 @@ export default function NovelDetailPage() {
         ]);
         setNovel(novelRes.data);
         setChapters(chaptersRes.data || []);
+        // 登录用户且非作者：检查书架收藏状态
+        if (isLoggedIn && !novelRes.data.isOwner) {
+          try {
+            const shelfRes: any = await checkBookshelf(novelId);
+            setInBookshelf(shelfRes.data?.inBookshelf ?? false);
+          } catch {
+            // 忽略书架查询失败
+          }
+        }
       } catch (error: any) {
         message.error(error.message || '获取小说信息失败');
       } finally {
@@ -47,6 +55,40 @@ export default function NovelDetailPage() {
 
     fetchData();
   }, [novelId, hydrated, isLoggedIn]);
+
+  const handleToggleBookshelf = async () => {
+    if (!novel) return;
+    setTogglingShelf(true);
+    try {
+      if (inBookshelf) {
+        await removeFromBookshelf(novel.id);
+        setInBookshelf(false);
+        message.success('已移出书架');
+      } else {
+        await addToBookshelf(novel.id);
+        setInBookshelf(true);
+        message.success('已加入书架');
+      }
+    } catch (error: any) {
+      message.error(error.message || '操作失败');
+    } finally {
+      setTogglingShelf(false);
+    }
+  };
+
+  const handleToggleVisibility = async (checked: boolean) => {
+    if (!novel) return;
+    setTogglingVisibility(true);
+    try {
+      await updateNovelVisibility(novel.id, checked);
+      setNovel({ ...novel, isPublic: checked });
+      message.success(checked ? '已设为公开' : '已设为私有');
+    } catch (error: any) {
+      message.error(error.message || '操作失败');
+    } finally {
+      setTogglingVisibility(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -103,19 +145,41 @@ export default function NovelDetailPage() {
                 <Paragraph style={{ marginTop: '8px' }}>{novel.description}</Paragraph>
               </div>
             )}
-            <Button
-              type="primary"
-              icon={<ReadOutlined />}
-              size="large"
-              onClick={() => {
-                if (chapters.length > 0) {
-                  router.push(`/reader/${novelId}/${chapters[0].id}`);
-                }
-              }}
-              disabled={chapters.length === 0}
-            >
-              开始阅读
-            </Button>
+            <Space wrap>
+              <Button
+                type="primary"
+                icon={<ReadOutlined />}
+                size="large"
+                onClick={() => {
+                  if (chapters.length > 0) {
+                    router.push(`/reader/${novelId}/${chapters[0].id}`);
+                  }
+                }}
+                disabled={chapters.length === 0}
+              >
+                开始阅读
+              </Button>
+              {isLoggedIn && !novel.isOwner && (
+                <Button
+                  size="large"
+                  icon={inBookshelf ? <HeartFilled /> : <HeartOutlined />}
+                  onClick={handleToggleBookshelf}
+                  loading={togglingShelf}
+                >
+                  {inBookshelf ? '移出书架' : '加入书架'}
+                </Button>
+              )}
+              {novel.isOwner && (
+                <Space>
+                  <Text type="secondary">公开:</Text>
+                  <Switch
+                    checked={novel.isPublic}
+                    onChange={handleToggleVisibility}
+                    loading={togglingVisibility}
+                  />
+                </Space>
+              )}
+            </Space>
           </div>
         </div>
       </Card>

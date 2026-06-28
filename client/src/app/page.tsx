@@ -1,18 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Row, Col, Card, Input, Pagination, Spin, Empty, message } from 'antd';
 import Link from 'next/link';
 import { getNovelList } from '@/services/novel';
-import { useAppSelector } from '@/store/hooks';
 import { Novel } from '@/types';
 
 const { Search } = Input;
 
 export default function HomePage() {
-  const router = useRouter();
-  const { isLoggedIn, hydrated } = useAppSelector((state) => state.user);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -34,14 +30,8 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    // 等待登录态水合完成后判断
-    if (!hydrated) return;
-    if (!isLoggedIn) {
-      router.push('/login');
-      return;
-    }
     fetchNovels(1);
-  }, [hydrated, isLoggedIn]);
+  }, []);
 
   const handleSearch = (value: string) => {
     setKeyword(value);
@@ -55,7 +45,7 @@ export default function HomePage() {
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-        <h1 style={{ marginBottom: '16px' }}>小说阅读器</h1>
+        <h1 style={{ marginBottom: '16px' }}>小说书库</h1>
         <Search
           placeholder="搜索小说名称或作者"
           allowClear

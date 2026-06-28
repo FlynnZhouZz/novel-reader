@@ -2,10 +2,9 @@ import { Request, Response } from 'express';
 import * as novelService from '../services/novelService';
 import { success, badRequest, serverError } from '../utils/response';
 
-// 获取小说列表
+// 获取公开小说列表（首页，无需登录）
 export const getNovelList = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = req.userId!;
     const parsedPage = parseInt(req.query.page as string);
     const parsedLimit = parseInt(req.query.limit as string);
     const page = isNaN(parsedPage) ? 1 : parsedPage;
@@ -17,18 +16,18 @@ export const getNovelList = async (req: Request, res: Response): Promise<void> =
       badRequest(res, '分页参数无效');
       return;
     }
-    const result = await novelService.getNovelList(userId, page, limit, keyword, author);
+    const result = await novelService.getNovelList(page, limit, keyword, author);
     success(res, result);
   } catch (error) {
     serverError(res, (error as Error).message);
   }
 };
 
-// 获取小说详情
+// 获取小说详情（公开小说任何人可看；私有小说需作者或书架收藏者）
 export const getNovelDetail = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = req.userId!;
     const id = parseInt(req.params.id);
+    const userId = (req as any).userId as number | undefined;
 
     if (isNaN(id) || id < 1) {
       badRequest(res, '小说ID无效');
@@ -42,11 +41,11 @@ export const getNovelDetail = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// 获取章节目录
+// 获取章节目录（权限同详情）
 export const getChapterList = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = req.userId!;
     const novelId = parseInt(req.params.id);
+    const userId = (req as any).userId as number | undefined;
 
     if (isNaN(novelId) || novelId < 1) {
       badRequest(res, '小说ID无效');
@@ -60,12 +59,12 @@ export const getChapterList = async (req: Request, res: Response): Promise<void>
   }
 };
 
-// 获取章节内容
+// 获取章节内容（权限同详情）
 export const getChapterDetail = async (req: Request, res: Response): Promise<void> => {
   try {
-    const userId = req.userId!;
     const novelId = parseInt(req.params.novelId);
     const chapterId = parseInt(req.params.chapterId);
+    const userId = (req as any).userId as number | undefined;
 
     if (isNaN(novelId) || novelId < 1) {
       badRequest(res, '小说ID无效');
@@ -87,31 +86,23 @@ export const getChapterDetail = async (req: Request, res: Response): Promise<voi
 // 上传小说（从 crawler-novels）
 export const uploadNovelFromCrawler = async (req: Request, res: Response): Promise<void> => {
   try {
-    const {
-      crawlerNovelPath,
-      novelDir,
-      author,
-      contentBaseDir,
-      cover,
-      description,
-      overwrite,
-    } = req.body;
+    const userId = (req as any).userId as number;
+    const { novelDir, author, contentBaseDir, cover, description, overwrite, isPublic } = req.body;
 
-    // 兼容旧字段 crawlerNovelPath，优先使用 novelDir
-    const finalNovelDir = novelDir || crawlerNovelPath;
-    if (!finalNovelDir) {
-      badRequest(res, '请提供小说目录路径（novelDir 或 crawlerNovelPath）');
+    if (!novelDir) {
+      badRequest(res, '请提供小说目录路径 novelDir');
       return;
     }
 
     const result = await novelService.uploadNovelFromCrawler({
-      novelDir: finalNovelDir,
-      userId: req.userId!,
+      novelDir,
+      userId,
       author,
       contentBaseDir,
       cover,
       description,
-      overwrite,
+      overwrite: !!overwrite,
+      isPublic: !!isPublic,
     });
     success(res, result, '上传成功');
   } catch (error) {
@@ -119,10 +110,11 @@ export const uploadNovelFromCrawler = async (req: Request, res: Response): Promi
   }
 };
 
-// 创建小说（手动）
+// 创建小说（手动，归属当前用户）
 export const createNovel = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, author, cover, description } = req.body;
+    const userId = (req as any).userId as number;
+    const { name, author, cover, description, isPublic } = req.body;
 
     if (!name || name.length > 100) {
       badRequest(res, '小说名称无效（最多100字符）');
@@ -134,17 +126,18 @@ export const createNovel = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const result = await novelService.createNovel(req.userId!, name, author, cover, description);
+    const result = await novelService.createNovel(userId, name, author, cover, description, !!isPublic);
     success(res, result, '创建成功');
   } catch (error) {
     serverError(res, (error as Error).message);
   }
 };
 
-// 创建章节（手动）
+// 创建章节（手动，含归属校验）
 export const createChapter = async (req: Request, res: Response): Promise<void> => {
   try {
     const novelId = parseInt(req.params.id);
+    const userId = (req as any).userId as number;
     const { title, content, orderNum } = req.body;
 
     if (isNaN(novelId) || novelId < 1) {
@@ -162,8 +155,63 @@ export const createChapter = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await novelService.createChapter(novelId, req.userId!, title, content, orderNum);
+    const result = await novelService.createChapter(novelId, userId, title, content, orderNum);
     success(res, result, '创建成功');
+  } catch (error) {
+    serverError(res, (error as Error).message);
+  }
+};
+
+// 我的作品（当前用户上传的小说）
+export const getMyNovels = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req as any).userId as number;
+    const parsedPage = parseInt(req.query.page as string);
+    const parsedLimit = parseInt(req.query.limit as string);
+    const page = isNaN(parsedPage) ? 1 : parsedPage;
+    const limit = isNaN(parsedLimit) ? 20 : parsedLimit;
+
+    const result = await novelService.getMyNovels(userId, page, limit);
+    success(res, result);
+  } catch (error) {
+    serverError(res, (error as Error).message);
+  }
+};
+
+// 我的书架（当前用户收藏的小说）
+export const getMyBookshelf = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = (req as any).userId as number;
+    const parsedPage = parseInt(req.query.page as string);
+    const parsedLimit = parseInt(req.query.limit as string);
+    const page = isNaN(parsedPage) ? 1 : parsedPage;
+    const limit = isNaN(parsedLimit) ? 20 : parsedLimit;
+
+    const result = await novelService.getMyBookshelf(userId, page, limit);
+    success(res, result);
+  } catch (error) {
+    serverError(res, (error as Error).message);
+  }
+};
+
+// 修改小说公开状态（仅作者）
+export const updateNovelVisibility = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const novelId = parseInt(req.params.id);
+    const userId = (req as any).userId as number;
+    const { isPublic } = req.body;
+
+    if (isNaN(novelId) || novelId < 1) {
+      badRequest(res, '小说ID无效');
+      return;
+    }
+    if (typeof isPublic !== 'boolean') {
+      badRequest(res, 'isPublic 必须为布尔值');
+      return;
+    }
+
+    await novelService.updateNovelVisibility(novelId, userId, isPublic);
+    success(res, null, isPublic ? '已设为公开' : '已设为私有');
   } catch (error) {
     serverError(res, (error as Error).message);
   }

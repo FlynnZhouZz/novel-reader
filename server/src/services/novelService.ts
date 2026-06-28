@@ -1,5 +1,5 @@
 import { Op } from 'sequelize';
-import { Novel, Chapter } from '../models';
+import { Novel, Chapter, Bookshelf } from '../models';
 import { sequelize } from '../config/database';
 import fs from 'fs/promises';
 import path from 'path';
@@ -11,10 +11,13 @@ export interface NovelListItem {
   description: string | null;
   author: string;
   chapterCount: number;
+  isPublic?: boolean;
   createdAt: Date;
 }
 
-export interface NovelDetail extends NovelListItem {}
+export interface NovelDetail extends NovelListItem {
+  isOwner?: boolean;
+}
 
 export interface ChapterListItem {
   id: number;
@@ -31,15 +34,14 @@ export interface ChapterDetail {
   nextChapterId: number | null;
 }
 
-// 获取小说列表（分页+搜索，按用户书架过滤）
+// 获取公开小说列表（首页，无需登录）
 export const getNovelList = async (
-  userId: number,
   page: number = 1,
   limit: number = 20,
   keyword?: string,
   author?: string
 ): Promise<{ list: NovelListItem[]; total: number; page: number; limit: number }> => {
-  const where: any = { user_id: userId };
+  const where: any = { is_public: true };
 
   if (keyword) {
     where[Op.or] = [
@@ -83,8 +85,17 @@ export const getNovelList = async (
   return { list, total: count, page, limit };
 };
 
-// 获取小说详情（含归属校验）
-export const getNovelDetail = async (id: number, userId: number): Promise<NovelDetail> => {
+// 校验用户对小说的阅读权限：公开 OR 作者 OR 在书架中
+const checkReadPermission = async (novel: Novel, userId?: number): Promise<boolean> => {
+  if (novel.is_public) return true;
+  if (!userId) return false;
+  if (novel.user_id === userId) return true;
+  const inShelf = await Bookshelf.findOne({ where: { user_id: userId, novel_id: novel.id } });
+  return !!inShelf;
+};
+
+// 获取小说详情（公开小说任何人可看；私有小说需作者或书架收藏者）
+export const getNovelDetail = async (id: number, userId?: number): Promise<NovelDetail> => {
   const novel = await Novel.findByPk(id, {
     include: [
       {
@@ -100,7 +111,8 @@ export const getNovelDetail = async (id: number, userId: number): Promise<NovelD
     throw new Error('小说不存在');
   }
 
-  if (novel.user_id !== userId) {
+  const allowed = await checkReadPermission(novel, userId);
+  if (!allowed) {
     throw new Error('无权访问该小说');
   }
 
@@ -111,17 +123,20 @@ export const getNovelDetail = async (id: number, userId: number): Promise<NovelD
     description: novel.description,
     author: novel.author,
     chapterCount: (novel as any).chapters?.length || 0,
+    isPublic: novel.is_public,
+    isOwner: userId !== undefined && novel.user_id === userId,
     createdAt: novel.created_at,
   };
 };
 
-// 获取章节目录（含归属校验）
-export const getChapterList = async (novelId: number, userId: number): Promise<ChapterListItem[]> => {
+// 获取章节目录（权限同详情）
+export const getChapterList = async (novelId: number, userId?: number): Promise<ChapterListItem[]> => {
   const novel = await Novel.findByPk(novelId);
   if (!novel) {
     throw new Error('小说不存在');
   }
-  if (novel.user_id !== userId) {
+  const allowed = await checkReadPermission(novel, userId);
+  if (!allowed) {
     throw new Error('无权访问该小说');
   }
 
@@ -138,17 +153,18 @@ export const getChapterList = async (novelId: number, userId: number): Promise<C
   }));
 };
 
-// 获取章节内容（含归属校验）
+// 获取章节内容（权限同详情）
 export const getChapterDetail = async (
   novelId: number,
   chapterId: number,
-  userId: number
+  userId?: number
 ): Promise<ChapterDetail> => {
   const novel = await Novel.findByPk(novelId);
   if (!novel) {
     throw new Error('小说不存在');
   }
-  if (novel.user_id !== userId) {
+  const allowed = await checkReadPermission(novel, userId);
+  if (!allowed) {
     throw new Error('无权访问该小说');
   }
 
@@ -205,12 +221,13 @@ interface CrawlerIndex {
 
 export interface UploadOptions {
   novelDir: string;
-  userId: number;          // 归属用户（个人书架）
+  userId: number;          // 上传者用户ID
   author?: string;
   contentBaseDir?: string;
   cover?: string;
   description?: string;
   overwrite?: boolean;
+  isPublic?: boolean;      // 是否公开，默认 false（私有，仅作者可见，需手动改为公开才在首页展示）
 }
 
 export interface UploadResult {
@@ -234,6 +251,7 @@ export const uploadNovelFromCrawler = async (
     cover,
     description,
     overwrite = false,
+    isPublic = false,
   } = options;
 
   // 1. 校验并定位 index.json
@@ -259,7 +277,7 @@ export const uploadNovelFromCrawler = async (
 
   // 3. 事务内处理
   return await sequelize.transaction(async (t) => {
-    // 3.1 查询或创建小说（按用户书架 + 小说名去重）
+    // 3.1 查询或创建小说（按用户 + 小说名去重）
     const [novel, novelCreated] = await Novel.findOrCreate({
       where: { name: novelName, user_id: userId },
       defaults: {
@@ -268,6 +286,7 @@ export const uploadNovelFromCrawler = async (
         author: author || '未知作者',
         cover: cover || null,
         description: description || null,
+        is_public: isPublic,
       },
       transaction: t,
     });
@@ -391,13 +410,14 @@ export const uploadNovelFromCrawler = async (
   });
 };
 
-// 创建小说（手动，归属当前用户）
+// 创建小说（手动，归属当前用户，默认私有）
 export const createNovel = async (
   userId: number,
   name: string,
   author: string,
   cover?: string,
-  description?: string
+  description?: string,
+  isPublic: boolean = false
 ): Promise<{ id: number; name: string; author: string }> => {
   const novel = await Novel.create({
     name,
@@ -405,9 +425,114 @@ export const createNovel = async (
     user_id: userId,
     cover: cover || null,
     description: description || null,
+    is_public: isPublic,
   });
 
   return { id: novel.id, name: novel.name, author: novel.author };
+};
+
+// 我的作品（当前用户上传的小说）
+export const getMyNovels = async (
+  userId: number,
+  page: number = 1,
+  limit: number = 20
+): Promise<{ list: NovelListItem[]; total: number; page: number; limit: number }> => {
+  const where: any = { user_id: userId };
+  const offset = (page - 1) * limit;
+
+  const { rows, count } = await Novel.findAndCountAll({
+    where,
+    include: [
+      {
+        model: Chapter,
+        as: 'chapters',
+        attributes: ['id'],
+        required: false,
+      },
+    ],
+    distinct: true,
+    order: [['created_at', 'DESC']],
+    limit,
+    offset,
+  });
+
+  const list: NovelListItem[] = rows.map((novel) => ({
+    id: novel.id,
+    name: novel.name,
+    cover: novel.cover,
+    description: novel.description,
+    author: novel.author,
+    chapterCount: (novel as any).chapters?.length || 0,
+    isPublic: novel.is_public,
+    createdAt: novel.created_at,
+  }));
+
+  return { list, total: count, page, limit };
+};
+
+// 我的书架（当前用户收藏的小说，含自己的和别人的）
+export const getMyBookshelf = async (
+  userId: number,
+  page: number = 1,
+  limit: number = 20
+): Promise<{ list: NovelListItem[]; total: number; page: number; limit: number }> => {
+  const offset = (page - 1) * limit;
+
+  // 先从 bookshelf 表查出该用户收藏的 novel_id 列表（分页）
+  const { rows: shelfRows, count } = await Bookshelf.findAndCountAll({
+    where: { user_id: userId },
+    attributes: ['novel_id'],
+    order: [['created_at', 'DESC']],
+    limit,
+    offset,
+  });
+
+  const novelIds = shelfRows.map((r) => r.novel_id);
+
+  if (novelIds.length === 0) {
+    return { list: [], total: count, page, limit };
+  }
+
+  const novels = await Novel.findAll({
+    where: { id: novelIds },
+    include: [
+      {
+        model: Chapter,
+        as: 'chapters',
+        attributes: ['id'],
+        required: false,
+      },
+    ],
+    order: [['created_at', 'DESC']],
+  });
+
+  const list: NovelListItem[] = novels.map((novel) => ({
+    id: novel.id,
+    name: novel.name,
+    cover: novel.cover,
+    description: novel.description,
+    author: novel.author,
+    chapterCount: (novel as any).chapters?.length || 0,
+    createdAt: novel.created_at,
+  }));
+
+  return { list, total: count, page, limit };
+};
+
+// 修改小说公开状态（仅作者）
+export const updateNovelVisibility = async (
+  novelId: number,
+  userId: number,
+  isPublic: boolean
+): Promise<void> => {
+  const novel = await Novel.findByPk(novelId);
+  if (!novel) {
+    throw new Error('小说不存在');
+  }
+  if (novel.user_id !== userId) {
+    throw new Error('无权操作该小说');
+  }
+  await novel.update({ is_public: isPublic });
 };
 
 // 创建章节（手动，含归属校验）

@@ -21,6 +21,8 @@ export interface Novel {
   description: string | null;
   author: string;
   chapterCount: number;
+  isPublic?: boolean;
+  isOwner?: boolean;
   createdAt: string;
 }
 

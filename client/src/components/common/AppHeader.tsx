@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Layout, Menu, Button, Avatar, Dropdown } from 'antd';
-import { HomeOutlined, BookOutlined, UserOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
+import { HomeOutlined, BookOutlined, UserOutlined, LogoutOutlined, SettingOutlined, EditOutlined } from '@ant-design/icons';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
@@ -35,6 +35,7 @@ export default function AppHeader() {
   const menuItems = [
     { key: '/', label: <Link href="/">首页</Link>, icon: <HomeOutlined /> },
     { key: '/novels', label: <Link href="/novels">我的书架</Link>, icon: <BookOutlined /> },
+    { key: '/my-novels', label: <Link href="/my-novels">我的作品</Link>, icon: <EditOutlined /> },
   ];
 
   const userMenuItems = [

@@ -3,7 +3,7 @@
  * 爬虫小说上传脚本（个人书架模式，使用 token 鉴权）
  *
  * 用法：
- *   yarn upload <novelDir> [--author=<作者>] [--description=<简介>] [--cover=<url>] [--overwrite] [--content-base=<dir>]
+ *   yarn upload <novelDir> [--author=<作者>] [--description=<简介>] [--cover=<url>] [--overwrite] [--public] [--content-base=<dir>]
  *
  * 前置条件：
  *   必须先运行 yarn auth 登录，token 保存在 .upload-token（7 天过期）
@@ -71,6 +71,7 @@ async function main() {
     description: opts.description,
     cover: opts.cover || undefined,
     overwrite: 'overwrite' in opts,
+    isPublic: 'public' in opts,
     contentBaseDir: opts['content-base'] || undefined,
   });
 
