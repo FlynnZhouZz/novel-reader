@@ -45,7 +45,7 @@ Chapter.init(
       comment: '章节标题',
     },
     content: {
-      type: DataTypes.TEXT,
+      type: DataTypes.TEXT('medium'),
       allowNull: false,
       comment: '章节内容',
     },

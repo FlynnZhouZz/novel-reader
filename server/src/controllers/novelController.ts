@@ -83,14 +83,31 @@ export const getChapterDetail = async (req: Request, res: Response): Promise<voi
 // 上传小说（从 crawler-novels）
 export const uploadNovelFromCrawler = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { crawlerNovelPath } = req.body;
+    const {
+      crawlerNovelPath,
+      novelDir,
+      author,
+      contentBaseDir,
+      cover,
+      description,
+      overwrite,
+    } = req.body;
 
-    if (!crawlerNovelPath) {
-      badRequest(res, '请提供小说数据文件路径');
+    // 兼容旧字段 crawlerNovelPath，优先使用 novelDir
+    const finalNovelDir = novelDir || crawlerNovelPath;
+    if (!finalNovelDir) {
+      badRequest(res, '请提供小说目录路径（novelDir 或 crawlerNovelPath）');
       return;
     }
 
-    const result = await novelService.uploadNovelFromCrawler(crawlerNovelPath);
+    const result = await novelService.uploadNovelFromCrawler({
+      novelDir: finalNovelDir,
+      author,
+      contentBaseDir,
+      cover,
+      description,
+      overwrite,
+    });
     success(res, result, '上传成功');
   } catch (error) {
     serverError(res, (error as Error).message);
